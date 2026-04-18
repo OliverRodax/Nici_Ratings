@@ -5,16 +5,15 @@ import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
 
-# Wi-Fi is handled by the OS on Raspberry Pi - no code needed
-
 # Button GPIO pins (BCM numbering)
-BUTTON_PINS = [17, 27, 22]  # Change as per your wiring
+BUTTON_PINS = [17, 27, 22]
 
 # Button names
 BUTTON_NAMES = ["Gefallen", "Mittelmäßig", "Nicht gefallen"]
 
-# Persistent storage file (replaces EEPROM)
+# Persistent storage file
 DATA_FILE = "button_counts.json"
+PAST_DATA_DIR = "past_data"
 
 # Debounce delay in seconds
 DEBOUNCE_DELAY = 5.0
@@ -24,7 +23,7 @@ button_counts = [0, 0, 0]
 last_press_time = 0.0
 
 
-# --- Persistence (replaces EEPROM) ---
+# --- Persistence ---
 
 def load_counts():
     global button_counts
@@ -46,20 +45,35 @@ def save_counts():
     except Exception as e:
         print(f"Failed to save counts: {e}")
 
+def archive_counts():
+    """Save current counts to past_data/ before resetting."""
+    os.makedirs(PAST_DATA_DIR, exist_ok=True)
+    # Find next available filename (data1.json, data2.json, ...)
+    index = 1
+    while os.path.exists(os.path.join(PAST_DATA_DIR, f"data{index}.json")):
+        index += 1
+    archive_path = os.path.join(PAST_DATA_DIR, f"data{index}.json")
+    try:
+        with open(archive_path, "w") as f:
+            json.dump({
+                "counts": button_counts,
+                "labels": BUTTON_NAMES,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            }, f, ensure_ascii=False, indent=2)
+        print(f"Archived counts to {archive_path}")
+    except Exception as e:
+        print(f"Failed to archive counts: {e}")
+
 
 # --- HTML generation ---
 
 def generate_html():
-    items = ""
-    for i, name in enumerate(BUTTON_NAMES):
-        items += f"<li>{name}: {button_counts[i]} presses</li>"
     return f"""<!DOCTYPE html>
 <html>
 <head>
   <title>Raspberry Pi Button Counter</title>
   <meta charset="utf-8">
   <script>
-    // Poll the server every 2 seconds and update counts without full page reload
     async function updateCounts() {{
       try {{
         const res = await fetch('/data');
@@ -77,8 +91,6 @@ def generate_html():
   <ul>
     {"".join(f'<li>{BUTTON_NAMES[i]}: <span id="count-{i}">{button_counts[i]} presses</span></li>' for i in range(3))}
   </ul>
-  <br>
-  <a href="/reset"><button>Reset All Counts</button></a>
 </body>
 </html>"""
 
@@ -88,10 +100,11 @@ def generate_html():
 class RequestHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
-        pass  # Suppress default access logs
+        pass
 
     def do_GET(self):
         global button_counts
+
         if self.path == "/":
             html = generate_html()
             self.send_response(200)
@@ -100,14 +113,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(html.encode("utf-8"))
 
         elif self.path == "/data":
-            # JSON endpoint polled by the browser every 2 seconds
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps({"counts": button_counts}).encode("utf-8"))
 
         elif self.path == "/reset":
-            
+            archive_counts()
             button_counts = [0, 0, 0]
             save_counts()
             print("All button counts reset to 0")
@@ -130,7 +142,7 @@ def start_server():
 def setup_gpio():
     GPIO.setmode(GPIO.BCM)
     for pin in BUTTON_PINS:
-        GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)  # Pull-up, press = LOW
+        GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 def button_loop():
     global last_press_time
@@ -140,13 +152,13 @@ def button_loop():
             now = time.time()
             if now - last_press_time >= DEBOUNCE_DELAY:
                 for i, pin in enumerate(BUTTON_PINS):
-                    if GPIO.input(pin) == GPIO.LOW:  # Button pressed
+                    if GPIO.input(pin) == GPIO.LOW:
                         button_counts[i] += 1
                         last_press_time = now
                         save_counts()
                         print(f"Button {i + 1} ({BUTTON_NAMES[i]}) pressed. Count: {button_counts[i]}")
-                        break  # Only one press per debounce window
-            time.sleep(0.05)  # 50ms polling interval
+                        break
+            time.sleep(0.05)
     except KeyboardInterrupt:
         pass
 
@@ -157,7 +169,6 @@ if __name__ == "__main__":
     load_counts()
     setup_gpio()
 
-    # Run web server in background thread
     server_thread = Thread(target=start_server, daemon=True)
     server_thread.start()
 
