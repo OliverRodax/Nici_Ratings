@@ -6,7 +6,11 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
 
 # Button GPIO pins (BCM numbering)
+# Button GPIO pins (BCM numbering)
 BUTTON_PINS = [17, 27, 22]
+
+# LED GPIO pins (BCM numbering) - one per button
+LED_PINS = [18, 23, 24]  # Change as per your wiring
 
 # Button names
 BUTTON_NAMES = ["Gefallen", "Mittelmäßig", "Nicht gefallen"]
@@ -143,6 +147,9 @@ def setup_gpio():
     GPIO.setmode(GPIO.BCM)
     for pin in BUTTON_PINS:
         GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+    for pin in LED_PINS:
+        GPIO.setup(pin, GPIO.OUT)
+        GPIO.output(pin, GPIO.LOW)
 
 def button_loop():
     global last_press_time
@@ -152,16 +159,28 @@ def button_loop():
             now = time.time()
             if now - last_press_time >= DEBOUNCE_DELAY:
                 for i, pin in enumerate(BUTTON_PINS):
-                    if GPIO.input(pin) == GPIO.LOW:
+                    if GPIO.input(pin) == GPIO.LOW:  # Button pressed
                         button_counts[i] += 1
                         last_press_time = now
                         save_counts()
                         print(f"Button {i + 1} ({BUTTON_NAMES[i]}) pressed. Count: {button_counts[i]}")
+
+                        # LED on while button held
+                        GPIO.output(LED_PINS[i], GPIO.HIGH)
+                        while GPIO.input(pin) == GPIO.LOW:
+                            time.sleep(0.01)  # Wait for release
+
+                        # Keep LED on for remaining debounce delay
+                        elapsed = time.time() - last_press_time
+                        remaining = DEBOUNCE_DELAY - elapsed
+                        if remaining > 0:
+                            time.sleep(remaining)
+                        GPIO.output(LED_PINS[i], GPIO.LOW)
+
                         break
             time.sleep(0.05)
     except KeyboardInterrupt:
         pass
-
 
 # --- Main ---
 
