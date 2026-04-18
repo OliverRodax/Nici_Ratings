@@ -55,10 +55,28 @@ def generate_html():
         items += f"<li>{name}: {button_counts[i]} presses</li>"
     return f"""<!DOCTYPE html>
 <html>
-<head><title>Raspberry Pi Button Counter</title></head>
+<head>
+  <title>Raspberry Pi Button Counter</title>
+  <meta charset="utf-8">
+  <script>
+    // Poll the server every 2 seconds and update counts without full page reload
+    async function updateCounts() {{
+      try {{
+        const res = await fetch('/data');
+        const data = await res.json();
+        data.counts.forEach((count, i) => {{
+          document.getElementById('count-' + i).textContent = count + ' presses';
+        }});
+      }} catch (e) {{}}
+    }}
+    setInterval(updateCounts, 2000);
+  </script>
+</head>
 <body>
   <h1>Raspberry Pi Button Press Counts</h1>
-  <ul>{items}</ul>
+  <ul>
+    {"".join(f'<li>{BUTTON_NAMES[i]}: <span id="count-{i}">{button_counts[i]} presses</span></li>' for i in range(3))}
+  </ul>
   <br>
   <a href="/reset"><button>Reset All Counts</button></a>
 </body>
@@ -79,6 +97,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(html.encode("utf-8"))
+
+        elif self.path == "/data":
+            # JSON endpoint polled by the browser every 2 seconds
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"counts": button_counts}).encode("utf-8"))
 
         elif self.path == "/reset":
             global button_counts
