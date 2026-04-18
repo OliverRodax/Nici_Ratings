@@ -91,6 +91,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         pass  # Suppress default access logs
 
     def do_GET(self):
+        global button_counts
         if self.path == "/":
             html = generate_html()
             self.send_response(200)
@@ -106,7 +107,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"counts": button_counts}).encode("utf-8"))
 
         elif self.path == "/reset":
-            global button_counts
+            
             button_counts = [0, 0, 0]
             save_counts()
             print("All button counts reset to 0")
